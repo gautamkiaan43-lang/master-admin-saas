@@ -25,7 +25,7 @@ const User = sequelize.define('User', {
     allowNull: false,
   },
   softwareName: {
-    type: DataTypes.STRING, // HRM, CRM, ERP, etc.
+    type: DataTypes.STRING, // HRM, CRM, ERP, Payroll Software, etc.
     allowNull: false,
   },
   plan: {
@@ -55,6 +55,19 @@ const User = sequelize.define('User', {
   password: {
     type: DataTypes.STRING,
     allowNull: true, // optional — set when creating from dashboard
+  },
+  // ── Payroll Integration Fields ──────────────────────────────────────────────
+  payrollCompanyId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: null,
+    comment: 'Company ID in Payroll DB (saas_pop_db.companies.id) — set after provisioning',
+  },
+  payrollStatus: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    defaultValue: null,
+    comment: 'Last known status synced to Payroll: active | suspended | inactive',
   },
 }, {
   timestamps: true,

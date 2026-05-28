@@ -9,6 +9,7 @@ const {
   blockUser,
   deleteUser,
   clientLogin,
+  verifySubscription,
 } = require('../controllers/userController');
 const {
   getBlockedIps,
@@ -20,6 +21,7 @@ const { protect } = require('../middleware/authMiddleware');
 // Public routes (called from external software)
 router.post('/register', registerUser);
 router.post('/client-login', clientLogin);
+router.get('/verify-subscription', verifySubscription);
 
 // Protected routes (Superadmin only)
 router.use(protect);

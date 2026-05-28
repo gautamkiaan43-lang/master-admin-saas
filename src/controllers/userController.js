@@ -5,6 +5,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const axios = require('axios'); // Note: ensure axios is installed or use native fetch if Node 18+
 const BlockedIp = require('../models/BlockedIp');
+const payrollService = require('../services/payrollService');
+
+// Payroll software name values that trigger provisioning (case-insensitive)
+const PAYROLL_SOFTWARE_NAMES = ['payroll software', 'payroll', 'pay saas'];
+
+const isPayrollSelected = (softwareName) =>
+  PAYROLL_SOFTWARE_NAMES.includes((softwareName || '').toLowerCase().trim());
 
 // Helper to simulate webhook dispatch to client software
 const dispatchWebhook = async (user, eventType) => {
@@ -42,6 +49,7 @@ const registerUser = asyncHandler(async (req, res) => {
     hashedPassword = await bcrypt.hash(password, salt);
   }
 
+  // Create company in Super Admin DB first
   const user = await User.create({
     name,
     email,
@@ -56,14 +64,50 @@ const registerUser = asyncHandler(async (req, res) => {
     password: hashedPassword,
   });
 
-  if (user) {
-    // Don't return hashed password to frontend
-    const { password: _pw, ...safeUser } = user.toJSON();
-    res.status(201).json(safeUser);
-  } else {
+  if (!user) {
     res.status(400);
     throw new Error('Invalid user data');
   }
+
+  // ── Payroll Integration ────────────────────────────────────────────────────
+  // If the company registered for Payroll Software, provision a tenant in Payroll DB
+  let payrollProvisionResult = null;
+
+  if (isPayrollSelected(softwareName)) {
+    console.log(`[REGISTER] Payroll selected for "${companyName}" — provisioning Payroll tenant...`);
+
+    payrollProvisionResult = await payrollService.provisionPayrollCompany({
+      companyName,
+      email,
+      name,
+      plainPassword: password || 'ChangeMe@123', // forward plain password; Payroll hashes independently
+      phone: phone || null,
+    });
+
+    if (payrollProvisionResult) {
+      // Store Payroll company ID back into Super Admin DB
+      user.payrollCompanyId = payrollProvisionResult.payrollCompanyId;
+      user.payrollStatus = 'active';
+      await user.save();
+
+      console.log(
+        `[REGISTER] Payroll tenant created. payrollCompanyId=${payrollProvisionResult.payrollCompanyId} linked to user ${user.id}`
+      );
+    } else {
+      console.warn(
+        `[REGISTER] Payroll provisioning failed for "${companyName}" (user ${user.id}) — proceeding without Payroll link.`
+      );
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Don't return hashed password to frontend
+  const { password: _pw, ...safeUser } = user.toJSON();
+
+  res.status(201).json({
+    ...safeUser,
+    payrollProvisioned: !!payrollProvisionResult,
+  });
 });
 
 // @desc    Get all users with filtering, sorting, pagination
@@ -227,10 +271,25 @@ const toggleStatus = asyncHandler(async (req, res) => {
   if (user) {
     user.active = active;
     const updatedUser = await user.save();
-    
+
     // Dispatch webhook to external software
     dispatchWebhook(updatedUser, 'USER_STATUS_TOGGLED');
-    
+
+    // ── Payroll Sync ────────────────────────────────────────────────────────
+    if (updatedUser.payrollCompanyId) {
+      const payrollStatus = active ? 'active' : 'suspended';
+      const synced = await payrollService.syncCompanyStatus(updatedUser.payrollCompanyId, payrollStatus);
+
+      if (synced) {
+        updatedUser.payrollStatus = payrollStatus;
+        await updatedUser.save();
+        console.log(`[TOGGLE_STATUS] Payroll company ${updatedUser.payrollCompanyId} synced → ${payrollStatus}`);
+      } else {
+        console.warn(`[TOGGLE_STATUS] Payroll sync failed for company ${updatedUser.payrollCompanyId} (non-fatal)`);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     res.json({ message: `User status updated to ${active ? 'active' : 'inactive'}`, user: updatedUser });
   } else {
     res.status(404);
@@ -264,9 +323,25 @@ const blockUser = asyncHandler(async (req, res) => {
   if (user) {
     user.isBlocked = isBlocked;
     const updatedUser = await user.save();
-    
+
     // Dispatch webhook to external software
     dispatchWebhook(updatedUser, 'USER_BLOCKED_TOGGLED');
+
+    // ── Payroll Sync ────────────────────────────────────────────────────────
+    // Blocked users get 'suspended' in Payroll; unblocked → restore 'active'
+    if (updatedUser.payrollCompanyId) {
+      const payrollStatus = isBlocked ? 'suspended' : 'active';
+      const synced = await payrollService.syncCompanyStatus(updatedUser.payrollCompanyId, payrollStatus);
+
+      if (synced) {
+        updatedUser.payrollStatus = payrollStatus;
+        await updatedUser.save();
+        console.log(`[BLOCK_USER] Payroll company ${updatedUser.payrollCompanyId} synced → ${payrollStatus}`);
+      } else {
+        console.warn(`[BLOCK_USER] Payroll sync failed for company ${updatedUser.payrollCompanyId} (non-fatal)`);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     res.json({ message: `User status updated to ${isBlocked ? 'blocked' : 'unblocked'}`, user: updatedUser });
   } else {
@@ -340,6 +415,40 @@ const clientLogin = asyncHandler(async (req, res) => {
     user: safeUser
   });
 });
+// @desc    Verify subscription status
+// @route   GET /api/master/verify-subscription?email=...
+// @access  Public (called from external software)
+const verifySubscription = asyncHandler(async (req, res) => {
+  const { email } = req.query;
+
+  if (!email) {
+    res.status(400);
+    throw new Error('Email is required');
+  }
+
+  const user = await User.findOne({ where: { email } });
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found in master database');
+  }
+
+  if (!user.active) {
+    res.status(403);
+    throw new Error('Account is inactive. Please contact support.');
+  }
+
+  if (user.isBlocked) {
+    res.status(403);
+    throw new Error('Account has been blocked. Please contact support.');
+  }
+
+  if (new Date() > new Date(user.expiryDate)) {
+    res.status(403);
+    throw new Error('Subscription plan has expired. Please renew.');
+  }
+
+  res.json({ valid: true, message: 'Subscription is active' });
+});
 
 module.exports = {
   registerUser,
@@ -350,4 +459,5 @@ module.exports = {
   blockUser,
   deleteUser,
   clientLogin,
+  verifySubscription,
 };
