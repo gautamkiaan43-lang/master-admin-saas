@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios'); // Note: ensure axios is installed or use native fetch if Node 18+
 const BlockedIp = require('../models/BlockedIp');
 const payrollService = require('../services/payrollService');
+const attendanceService = require('../services/attendanceService');
 
 // Payroll software name values that trigger provisioning (case-insensitive)
 const PAYROLL_SOFTWARE_NAMES = ['payroll software', 'payroll', 'pay saas'];
@@ -101,12 +102,43 @@ const registerUser = asyncHandler(async (req, res) => {
   }
   // ──────────────────────────────────────────────────────────────────────────
 
+  // ── Attendance Integration ────────────────────────────────────────────────
+  // If the company registered for Attendance System, provision a tenant in Attendance DB
+  let attendanceProvisionResult = null;
+
+  if (softwareName && (softwareName.toLowerCase().includes('attendance') || softwareName.toLowerCase().includes('hrm'))) {
+    console.log(`[REGISTER] Attendance selected for "${companyName}" — provisioning Attendance tenant...`);
+
+    attendanceProvisionResult = await attendanceService.provisionAttendanceCompany({
+      companyName,
+      email,
+      name,
+      plainPassword: password || 'ChangeMe@123',
+      phone: phone || null,
+      plan: plan
+    });
+
+    if (attendanceProvisionResult) {
+      // If we had an attendanceCompanyId column in superadmin DB we would save it here, 
+      // but for now we just log it. (Can add later if needed)
+      console.log(
+        `[REGISTER] Attendance tenant created. attendanceCompanyId=${attendanceProvisionResult.attendanceCompanyId} linked to user ${user.id}`
+      );
+    } else {
+      console.warn(
+        `[REGISTER] Attendance provisioning failed for "${companyName}" (user ${user.id}) — proceeding without Attendance link.`
+      );
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   // Don't return hashed password to frontend
   const { password: _pw, ...safeUser } = user.toJSON();
 
   res.status(201).json({
     ...safeUser,
     payrollProvisioned: !!payrollProvisionResult,
+    attendanceProvisioned: !!attendanceProvisionResult,
   });
 });
 

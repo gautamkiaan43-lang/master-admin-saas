@@ -8,7 +8,7 @@ const userRoutes = require('./routes/userRoutes');
 const planRoutes = require('./routes/planRoutes');
 const statusRoutes = require('./routes/statusRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
-
+const paymentRoutes = require('./routes/paymentRoutes');
 const app = express();
 
 // Middleware
@@ -33,6 +33,7 @@ app.use('/api/master', userRoutes);
 app.use('/api/master/status', statusRoutes);
 app.use('/api/master/dashboard', dashboardRoutes);
 app.use('/api/plans', planRoutes);
+app.use('/api/payment', paymentRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
