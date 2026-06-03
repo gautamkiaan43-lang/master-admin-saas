@@ -30,6 +30,7 @@ const Plan = sequelize.define('Plan', {
     allowNull: true,
   },
 }, {
+  tableName: 'plans',
   timestamps: true,
 });
 

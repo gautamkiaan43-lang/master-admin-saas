@@ -17,6 +17,7 @@ const BlockedIp = sequelize.define('BlockedIp', {
     allowNull: true,
   },
 }, {
+  tableName: 'blockedips',
   timestamps: true,
 });
 

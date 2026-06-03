@@ -70,6 +70,7 @@ const User = sequelize.define('User', {
     comment: 'Last known status synced to Payroll: active | suspended | inactive',
   },
 }, {
+  tableName: 'users',
   timestamps: true,
 });
 

@@ -33,6 +33,7 @@ const Admin = sequelize.define('Admin', {
     defaultValue: 'SUPERADMIN',
   },
 }, {
+  tableName: 'admins',
   timestamps: true,
 });
 
