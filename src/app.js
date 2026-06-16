@@ -24,13 +24,19 @@ app.use(cors({
     if (!origin) return callback(null, true);
 
     const allowedOrigins = [
-      'https://master-admin-kiaan.netlify.app'
+      'https://master-admin-kiaan.netlify.app',
+      'https://kiaanmastersuperadmin.netlify.app'
     ];
 
     const isLocal = origin.startsWith('http://localhost') || 
                     origin.startsWith('http://127.0.0.1');
 
-    if (isLocal || allowedOrigins.includes(origin)) {
+    const isAllowedDomain = isLocal || 
+                            allowedOrigins.includes(origin) || 
+                            origin.includes('hrpilotpro') || 
+                            origin.includes('netlify.app');
+
+    if (isAllowedDomain) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
