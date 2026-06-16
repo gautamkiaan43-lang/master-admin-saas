@@ -9,11 +9,33 @@ const planRoutes = require('./routes/planRoutes');
 const statusRoutes = require('./routes/statusRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const supportRoutes = require('./routes/supportRoutes');
+
+// Load support models to sync them with database
+require('./models/SupportTicket');
+require('./models/TicketMessage');
+
 const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174','http://localhost:3000', 'http://127.0.0.1:5173','https://master-admin-kiaan.netlify.app'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      'https://master-admin-kiaan.netlify.app'
+    ];
+
+    const isLocal = origin.startsWith('http://localhost') || 
+                    origin.startsWith('http://127.0.0.1');
+
+    if (isLocal || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -34,6 +56,7 @@ app.use('/api/master/status', statusRoutes);
 app.use('/api/master/dashboard', dashboardRoutes);
 app.use('/api/plans', planRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/support', supportRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

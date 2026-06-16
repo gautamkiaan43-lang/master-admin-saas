@@ -55,12 +55,9 @@ const provisionPayrollCompany = async (userData) => {
 
     return { payrollCompanyId, payrollAdminId };
   } catch (error) {
-    // Fail silently — Super Admin registration still succeeds even if Payroll is down
-    console.error(
-      '[PAYROLL_SERVICE] provisionPayrollCompany failed (non-fatal):',
-      error?.response?.data?.message || error.message
-    );
-    return null;
+    const errMsg = error?.response?.data?.message || error.message;
+    console.error('[PAYROLL_SERVICE] provisionPayrollCompany failed:', errMsg);
+    throw new Error(errMsg);
   }
 };
 
@@ -97,7 +94,41 @@ const syncCompanyStatus = async (payrollCompanyId, status) => {
   }
 };
 
+const syncTicketReply = async (ticketNumber, replyData) => {
+  const url = `${getPayrollBase()}/api/internal/support/sync`;
+  try {
+    await logApiCall('POST', url, () =>
+      axios.post(url, { action: 'reply', ticketNumber, reply: replyData }, { headers: getInternalHeaders(), timeout: 8000 })
+    );
+    return true;
+  } catch (error) {
+    console.error(
+      `[PAYROLL_SERVICE] syncTicketReply failed for ticket ${ticketNumber}:`,
+      error?.response?.data?.message || error.message
+    );
+    return false;
+  }
+};
+
+const syncTicketStatus = async (ticketNumber, status, priority) => {
+  const url = `${getPayrollBase()}/api/internal/support/sync`;
+  try {
+    await logApiCall('POST', url, () =>
+      axios.post(url, { action: 'status', ticketNumber, status, priority }, { headers: getInternalHeaders(), timeout: 8000 })
+    );
+    return true;
+  } catch (error) {
+    console.error(
+      `[PAYROLL_SERVICE] syncTicketStatus failed for ticket ${ticketNumber}:`,
+      error?.response?.data?.message || error.message
+    );
+    return false;
+  }
+};
+
 module.exports = {
   provisionPayrollCompany,
   syncCompanyStatus,
+  syncTicketReply,
+  syncTicketStatus,
 };

@@ -10,6 +10,7 @@ const {
   deleteUser,
   clientLogin,
   verifySubscription,
+  upgradeSubscription,
 } = require('../controllers/userController');
 const {
   getBlockedIps,
@@ -17,11 +18,13 @@ const {
   removeBlockedIp,
 } = require('../controllers/ipController');
 const { protect } = require('../middleware/authMiddleware');
+const { verifyInternalKey } = require('../middleware/internalMiddleware');
 
 // Public routes (called from external software)
 router.post('/register', registerUser);
 router.post('/client-login', clientLogin);
 router.get('/verify-subscription', verifySubscription);
+router.post('/upgrade-subscription', verifyInternalKey, upgradeSubscription);
 
 // Protected routes (Superadmin only)
 router.use(protect);
