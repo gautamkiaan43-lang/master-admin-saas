@@ -15,28 +15,17 @@ const getDashboardStats = asyncHandler(async (req, res) => {
   
   const freeTrialUsers = await User.count({
     where: {
-      [Op.or]: [
-        { plan: { [Op.in]: ['FREE_TRIAL', '10 Days Free', 'free', 'Free Trial'] } },
-        { planPrice: 0 },
-        { planPrice: null }
-      ]
+      plan: {
+        [Op.in]: ['FREE_TRIAL', '10 Days Free', 'free', 'Free Trial']
+      }
     }
   });
   
   const paidUsers = await User.count({
     where: {
-      [Op.and]: [
-        {
-          plan: {
-            [Op.notIn]: ['FREE_TRIAL', '10 Days Free', 'free', 'Free Trial']
-          }
-        },
-        {
-          planPrice: {
-            [Op.gt]: 0
-          }
-        }
-      ]
+      plan: {
+        [Op.notIn]: ['FREE_TRIAL', '10 Days Free', 'free', 'Free Trial']
+      }
     }
   });
 

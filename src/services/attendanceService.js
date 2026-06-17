@@ -28,9 +28,11 @@ const provisionAttendanceCompany = async (userData) => {
     const { companyId, userId } = response.data;
     return { attendanceCompanyId: companyId, attendanceAdminId: userId };
   } catch (error) {
-    const errMsg = error?.response?.data?.message || error.message;
-    console.error('[ATTENDANCE_SERVICE] provisionAttendanceCompany failed:', errMsg);
-    throw new Error(errMsg);
+    console.error(
+      '[ATTENDANCE_SERVICE] provisionAttendanceCompany failed (non-fatal):',
+      error?.response?.data?.message || error.message
+    );
+    return null;
   }
 };
 

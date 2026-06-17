@@ -2,30 +2,15 @@ const express = require('express');
 const router = express.Router();
 const supportController = require('../controllers/supportController');
 const { protect } = require('../middleware/authMiddleware');
-const { verifyInternalKey } = require('../middleware/internalMiddleware');
 
-// Internal service-to-service creation route (from Payroll backend)
-router.post('/create-ticket', verifyInternalKey, supportController.createTicket);
+// Public sync route (internal authentication verified inside controller)
+router.post('/create-ticket', supportController.createTicketSync);
 
-// Internal service-to-service status sync/reply routes (from Payroll backend)
-router.post('/reply/:id', (req, res, next) => {
-  const apiKey = req.headers['x-internal-api-key'];
-  if (apiKey) {
-    return verifyInternalKey(req, res, next);
-  }
-  return protect(req, res, next);
-}, supportController.replyToTicket);
-
-router.put('/:id/status', (req, res, next) => {
-  const apiKey = req.headers['x-internal-api-key'];
-  if (apiKey) {
-    return verifyInternalKey(req, res, next);
-  }
-  return protect(req, res, next);
-}, supportController.updateTicketStatus);
-
-// Super Admin dashboard routes
-router.get('/', protect, supportController.getAllTickets);
-router.get('/:id', protect, supportController.getTicketById);
+// Protected routes (require superadmin session token)
+router.use(protect);
+router.get('/tickets', supportController.getAllTickets);
+router.get('/ticket/:id', supportController.getTicketById);
+router.post('/reply/:id', supportController.replyToTicket);
+router.put('/ticket/:id/status', supportController.updateTicketStatus);
 
 module.exports = router;

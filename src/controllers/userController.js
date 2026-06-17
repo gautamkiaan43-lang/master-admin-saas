@@ -37,37 +37,8 @@ const registerUser = asyncHandler(async (req, res) => {
 
   if (userExists) {
     res.status(400);
-    throw new Error('User already exists in Master database');
+    throw new Error('User already exists');
   }
-
-  // ── Provision External Systems First ─────────────────────────────────────────
-  let payrollProvisionResult = null;
-  if (isPayrollSelected(softwareName)) {
-    console.log(`[REGISTER] Payroll selected for "${companyName}" — provisioning Payroll tenant...`);
-    // This will throw if the external call fails (e.g. duplicate email or offline)
-    payrollProvisionResult = await payrollService.provisionPayrollCompany({
-      companyName,
-      email,
-      name,
-      plainPassword: password || 'ChangeMe@123',
-      phone: phone || null,
-    });
-  }
-
-  let attendanceProvisionResult = null;
-  if (softwareName && (softwareName.toLowerCase().includes('attendance') || softwareName.toLowerCase().includes('hrm'))) {
-    console.log(`[REGISTER] Attendance selected for "${companyName}" — provisioning Attendance tenant...`);
-    // This will throw if the external call fails (e.g. duplicate email or offline)
-    attendanceProvisionResult = await attendanceService.provisionAttendanceCompany({
-      companyName,
-      email,
-      name,
-      plainPassword: password || 'ChangeMe@123',
-      phone: phone || null,
-      plan: plan
-    });
-  }
-  // ──────────────────────────────────────────────────────────────────────────
 
   // Get IP address from req.body if provided, else from req.ip (e.g. proxy/client ip)
   const clientIpAddress = ipAddress || req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
@@ -79,7 +50,7 @@ const registerUser = asyncHandler(async (req, res) => {
     hashedPassword = await bcrypt.hash(password, salt);
   }
 
-  // Create company in Super Admin DB (only if external provisioning succeeded)
+  // Create company in Super Admin DB first
   const user = await User.create({
     name,
     email,
@@ -92,8 +63,6 @@ const registerUser = asyncHandler(async (req, res) => {
     active: true,
     ipAddress: clientIpAddress,
     password: hashedPassword,
-    payrollCompanyId: payrollProvisionResult ? payrollProvisionResult.payrollCompanyId : null,
-    payrollStatus: payrollProvisionResult ? 'active' : null,
   });
 
   if (!user) {
@@ -101,17 +70,67 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new Error('Invalid user data');
   }
 
-  if (payrollProvisionResult) {
-    console.log(
-      `[REGISTER] Payroll tenant created. payrollCompanyId=${payrollProvisionResult.payrollCompanyId} linked to user ${user.id}`
-    );
+  // ── Payroll Integration ────────────────────────────────────────────────────
+  // If the company registered for Payroll Software, provision a tenant in Payroll DB
+  let payrollProvisionResult = null;
+
+  if (isPayrollSelected(softwareName)) {
+    console.log(`[REGISTER] Payroll selected for "${companyName}" — provisioning Payroll tenant...`);
+
+    payrollProvisionResult = await payrollService.provisionPayrollCompany({
+      companyName,
+      email,
+      name,
+      plainPassword: password || 'ChangeMe@123', // forward plain password; Payroll hashes independently
+      phone: phone || null,
+    });
+
+    if (payrollProvisionResult) {
+      // Store Payroll company ID back into Super Admin DB
+      user.payrollCompanyId = payrollProvisionResult.payrollCompanyId;
+      user.payrollStatus = 'active';
+      await user.save();
+
+      console.log(
+        `[REGISTER] Payroll tenant created. payrollCompanyId=${payrollProvisionResult.payrollCompanyId} linked to user ${user.id}`
+      );
+    } else {
+      console.warn(
+        `[REGISTER] Payroll provisioning failed for "${companyName}" (user ${user.id}) — proceeding without Payroll link.`
+      );
+    }
   }
-  
-  if (attendanceProvisionResult) {
-    console.log(
-      `[REGISTER] Attendance tenant created. attendanceCompanyId=${attendanceProvisionResult.attendanceCompanyId} linked to user ${user.id}`
-    );
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // ── Attendance Integration ────────────────────────────────────────────────
+  // If the company registered for Attendance System, provision a tenant in Attendance DB
+  let attendanceProvisionResult = null;
+
+  if (softwareName && (softwareName.toLowerCase().includes('attendance') || softwareName.toLowerCase().includes('hrm'))) {
+    console.log(`[REGISTER] Attendance selected for "${companyName}" — provisioning Attendance tenant...`);
+
+    attendanceProvisionResult = await attendanceService.provisionAttendanceCompany({
+      companyName,
+      email,
+      name,
+      plainPassword: password || 'ChangeMe@123',
+      phone: phone || null,
+      plan: plan
+    });
+
+    if (attendanceProvisionResult) {
+      // If we had an attendanceCompanyId column in superadmin DB we would save it here, 
+      // but for now we just log it. (Can add later if needed)
+      console.log(
+        `[REGISTER] Attendance tenant created. attendanceCompanyId=${attendanceProvisionResult.attendanceCompanyId} linked to user ${user.id}`
+      );
+    } else {
+      console.warn(
+        `[REGISTER] Attendance provisioning failed for "${companyName}" (user ${user.id}) — proceeding without Attendance link.`
+      );
+    }
   }
+  // ──────────────────────────────────────────────────────────────────────────
 
   // Don't return hashed password to frontend
   const { password: _pw, ...safeUser } = user.toJSON();
@@ -463,42 +482,6 @@ const verifySubscription = asyncHandler(async (req, res) => {
   res.json({ valid: true, message: 'Subscription is active' });
 });
 
-// @desc    Upgrade user subscription from external application
-// @route   POST /api/master/upgrade-subscription
-// @access  Internal (Service to Service with API Key)
-const upgradeSubscription = asyncHandler(async (req, res) => {
-  const { email, plan, planPrice, durationDays } = req.body;
-
-  if (!email || !plan) {
-    res.status(400);
-    throw new Error('Email and plan details are required');
-  }
-
-  const user = await User.findOne({ where: { email } });
-  if (!user) {
-    res.status(404);
-    throw new Error('User not found in master database');
-  }
-
-  const days = parseInt(durationDays || 30, 10);
-  const newExpiry = new Date();
-  newExpiry.setDate(newExpiry.getDate() + days);
-
-  user.plan = plan;
-  user.planPrice = planPrice || 0;
-  user.expiryDate = newExpiry;
-  user.active = true; // Reactivate the user
-
-  await user.save();
-
-  res.json({
-    success: true,
-    message: 'Subscription upgraded successfully',
-    expiryDate: user.expiryDate,
-    plan: user.plan
-  });
-});
-
 module.exports = {
   registerUser,
   getUsers,
@@ -509,5 +492,4 @@ module.exports = {
   deleteUser,
   clientLogin,
   verifySubscription,
-  upgradeSubscription,
 };
